@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+from random import random
 
 from aiogram import Bot, Dispatcher, executor, types
 from config.tg_token import API_TOKEN
@@ -30,7 +31,7 @@ def get_info_about_user(user_id):
     power_f = n_stalk * 7
     money = cur.execute('''SELECT money FROM main WHERE user_id = ?''',
                         (user_id,)).fetchone()[0]
-    return (n_stalk, power_f, cost, money)
+    return n_stalk, power_f, cost, money
 
 
 @dp.message_handler(commands=['start'])
@@ -64,6 +65,10 @@ async def chose_faction(message: types.Message):
         SET faction = (SELECT id FROM factions WHERE name = ?)
         WHERE user_id = ?''', (message.text, message.from_user.id))
         conn.commit()
+        # await dp.bot.set_my_commands([
+        #     types.BotCommand("help", "Информация о боте"),
+        #     types.BotCommand("recruitment", "Наем сталкеров"),
+        # ])
         await message.answer("Привествуем тебя в рядах группировки \"{}\"!".format(message.text),
                              reply_markup=menu_kb)
     else:
@@ -85,7 +90,7 @@ async def hired_update_text_and_db(message: types.Message, n_stalk, money, cost,
         SET money = ?,
         power_of_faction = ?, 
         n_stalk = ?
-        WHERE user_id = ?''', (money, power_f, n_stalk, message.chat.id))  # передется chat.id, а не from_user.id,
+        WHERE user_id = ?''', (money, power_f, n_stalk, message.chat.id))  # передается chat.id, а не from_user.id,
         # т.к. в эту функцию передается сообщение не от пользователя, а от callback'a
         conn.commit()
         await message.edit_text('''☢На данный момент сталкеров в группе: {}
@@ -103,10 +108,10 @@ async def hired_update_text_and_db(message: types.Message, n_stalk, money, cost,
 @dp.callback_query_handler(Text('hire'))
 async def hire_callback(call: types.CallbackQuery):
     info = get_info_about_user(call.from_user.id)
-    money = int(info[3])
-    cost = int(info[2])
-    n_stalk = int(info[0])
-    power_f = int(info[1])
+    money = info[3]
+    cost = info[2]
+    n_stalk = info[0]
+    power_f = info[1]
     if money >= cost:
         new_n_stalk = n_stalk + 1
         power_f = new_n_stalk * 7
@@ -116,6 +121,24 @@ async def hire_callback(call: types.CallbackQuery):
     else:
         await hired_update_text_and_db(call.message, n_stalk, money, cost, power_f, False)
     await call.answer()
+
+
+@dp.message_handler(commands=['attack'])
+def attack_other_faction(message: types.Message):
+    info = get_info_about_user(message.from_user.id)
+    power = info[1]
+
+    if power < 50:
+        chance = 0.3
+        if power != 7:
+            chance_l_st = 0.15
+    elif power < 100:
+        chance = 0.5
+    else:
+        chance = 0.75
+
+    if random() <= 0.3:
+        pass
 
 
 if __name__ == '__main__':
