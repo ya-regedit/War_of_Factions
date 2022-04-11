@@ -11,3 +11,4 @@ class Art(SqlAlchemyBase, SerializerMixin):
     name = sqlalchemy.Column(sqlalchemy.String)
     chance = sqlalchemy.Column(sqlalchemy.Integer)
     path = sqlalchemy.Column(sqlalchemy.String)
+    description = sqlalchemy.Column(sqlalchemy.String)

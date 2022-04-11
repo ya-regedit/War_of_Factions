@@ -1,13 +1,8 @@
-from flask import Flask, Blueprint
-from flask_restful import reqparse, abort, Api, Resource
+from flask import Flask
+from flask_restful import Api
 from data import db_session
 from config.secret_key import secret_key
-
-blueprint = Blueprint(
-    'arts_api',
-    __name__,
-    template_folder='templates'
-)
+import data.arts_api as arts_api
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secret_key
