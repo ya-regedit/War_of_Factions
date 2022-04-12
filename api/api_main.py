@@ -4,12 +4,12 @@ from flask import Flask
 from flask_restful import Api
 from data import db_session
 import data.arts_api as arts_api
-import logging
-
-logging.basicConfig(
-    filename='example.log',
-    format='%(asctime)s %(levelname)s %(name)s %(message)s'
-)
+# import logging
+#
+# logging.basicConfig(
+#     filename='example.log',
+#     format='%(asctime)s %(levelname)s %(name)s %(message)s'
+# )
 
 app = Flask(__name__)
 api = Api(app)
