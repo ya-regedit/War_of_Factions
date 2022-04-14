@@ -13,8 +13,9 @@ blueprint = Blueprint(
 @blueprint.route('/arts')
 def get_art():
     db_sess = create_session()
-    art = db_sess.query(Art).all()
-    if not art:
+    arts = db_sess.query(Art).all()
+    db_sess.close()
+    if not arts:
         return jsonify({'error': 'Not found'})
     return jsonify(
-        {'arts': [item.to_dict(only=('name', 'path', 'description')) for item in art]})
+        {'arts': [item.to_dict(only=('id', 'name', 'path', 'description', 'chance')) for item in arts]})

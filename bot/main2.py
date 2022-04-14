@@ -1,11 +1,19 @@
 import logging
 import sqlite3
-from random import random
+from random import random, shuffle, sample
+from requests import get
 
-from aiogram import Bot, Dispatcher, executor, types
 from config.tg_token import API_TOKEN
+from aiogram import Bot, Dispatcher, executor, types
 from keyboards import chose_faction_kb, remove_keyboard, hire_stalker_kb, menu_kb
 from aiogram.dispatcher.filters import Text
+from aiogram.types.input_file import InputFile
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.schedulers import SchedulerAlreadyRunningError
+
+from pymorphy2 import MorphAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +24,14 @@ dp = Dispatcher(bot)
 
 conn = sqlite3.connect('db/users_info.db')
 cur = conn.cursor()
+
+conn2 = sqlite3.connect('../api/db/artifacts.db')
+cur2 = conn2.cursor()
+
+sheduler = AsyncIOScheduler()
+
+morph = MorphAnalyzer()
+rub = morph.parse('рубль')[0]
 
 
 def user_is_registered(msg):
@@ -51,10 +67,16 @@ async def start(message: types.Message):
 
 @dp.message_handler(commands=['help'])
 async def help_info(message: types.Message):
+    await dp.bot.set_my_commands([
+        types.BotCommand("help", "Информация о боте"),
+        types.BotCommand("recruitment", "Наем сталкеров"),
+        types.BotCommand("art_raid", "Вылазка за артефактом")
+    ])
     await message.answer('''Telegram бот-игра "S.T.A.L.K.E.R. Война группировок"
 Возглавьте одну из предложенных группировок, 
 устраивайте рейды на мутантов, отправляйте сталкеров из своей группировки на поиски артефактов. 
-Покупайте и продавайте товары у торговцев. Совершайте атаки на другие группировки и многое другое.
+Покупайте и продавайте товары у торговцев. Совершайте атаки на другие группировки.
+Доступно меню команд (кнопка слева от поля ввода сообщения)
 ''')
 
 
@@ -65,10 +87,6 @@ async def chose_faction(message: types.Message):
         SET faction = (SELECT id FROM factions WHERE name = ?)
         WHERE user_id = ?''', (message.text, message.from_user.id))
         conn.commit()
-        # await dp.bot.set_my_commands([
-        #     types.BotCommand("help", "Информация о боте"),
-        #     types.BotCommand("recruitment", "Наем сталкеров"),
-        # ])
         await message.answer("Привествуем тебя в рядах группировки \"{}\"!".format(message.text),
                              reply_markup=menu_kb)
     else:
@@ -80,8 +98,9 @@ async def recruitment(message: types.Message):
     info = get_info_about_user(message.from_user.id)
     await message.answer('''☢На данный момент сталкеров в группе: {}
 ☢Мощь группировки: {}
-☢Стоимость найма: {}
-☢Рублей: {}'''.format(info[0], info[1], info[2], info[3]), reply_markup=hire_stalker_kb)
+☢Стоимость найма: {} {}
+☢Денег: {} {}'''.format(info[0], info[1], info[2], rub.make_agree_with_number(info[2]).word, info[3],
+                        rub.make_agree_with_number(info[3]).word), reply_markup=hire_stalker_kb)
 
 
 async def hired_update_text_and_db(message: types.Message, n_stalk, money, cost, power_f, purchase_is_done):
@@ -95,14 +114,16 @@ async def hired_update_text_and_db(message: types.Message, n_stalk, money, cost,
         conn.commit()
         await message.edit_text('''☢На данный момент сталкеров в группе: {}
 ☢Мощь группировки: {}
-☢Стоимость найма: {}
-☢Рублей: {}'''.format(n_stalk, power_f, cost, money), reply_markup=hire_stalker_kb)
+☢Стоимость найма: {} {}
+☢Денег: {} {}'''.format(n_stalk, power_f, cost, rub.make_agree_with_number(cost).word, money,
+                        rub.make_agree_with_number(money).word), reply_markup=hire_stalker_kb)
     else:
         await message.edit_text('''☢На данный момент сталкеров в группе: {}
 ☢Мощь группировки: {}
-☢Стоимость найма: {}
-☢Рублей: {}
-Маловато у тебя денег, сталкер'''.format(n_stalk, power_f, cost, money))
+☢Стоимость найма: {} {}
+☢Денег: {} {}
+Маловато у тебя денег, сталкер'''.format(n_stalk, power_f, cost, rub.make_agree_with_number(cost).word, money,
+                                         rub.make_agree_with_number(money).word))
 
 
 @dp.callback_query_handler(Text('hire'))
@@ -123,22 +144,73 @@ async def hire_callback(call: types.CallbackQuery):
     await call.answer()
 
 
-@dp.message_handler(commands=['attack'])
-def attack_other_faction(message: types.Message):
-    info = get_info_about_user(message.from_user.id)
-    power = info[1]
+@dp.message_handler(commands='art_raid')
+async def raid_for_artifact(message: types.Message):
+    may_send_stalkers = True
+    jobs = sheduler.get_jobs()
 
-    if power < 50:
-        chance = 0.3
-        if power != 7:
-            chance_l_st = 0.15
-    elif power < 100:
-        chance = 0.5
+    for j in jobs:
+        if j.name == 'raid':
+            may_send_stalkers = False
+            break
+
+    if may_send_stalkers:
+        arts = get('http://127.0.0.1:5000/arts').json()
+        arts = sorted(arts['arts'], key=lambda x: x['chance'])
+        chance = random()
+        art = None
+        photo, caption = None, None
+        for i in range(len(arts)):
+            if chance <= arts[i]['chance']:
+                art = arts[i]
+                break
+            else:
+                continue
+        if art:
+            photo = InputFile(art['path'])
+            caption = art['description']
+
+        trigger = IntervalTrigger(seconds=10)
+        sheduler.add_job(raid, args=[message.chat.id, photo, caption, str(art['id'])], trigger=trigger)
+        try:
+            sheduler.start()
+        except SchedulerAlreadyRunningError:
+            pass
+        await message.answer('Сталкеры отправлены на вылазку. Вернутся через 10 секунд')
     else:
-        chance = 0.75
+        await message.answer('Сталкеры уже отправлены на вылазку. Дождитесь её окончания')
 
-    if random() <= 0.3:
-        pass
+
+async def raid(chat_id, photo, caption, art_id):
+    if photo:
+        arts = cur.execute('''SELECT arts FROM main WHERE user_id = ?''',
+                           (chat_id,)).fetchone()[0]
+        if arts == 0:
+            arts = f'{art_id};'
+        else:
+            arts = f'{arts}{art_id};'
+        cur.execute('''UPDATE main
+        SET arts = ?
+        WHERE user_id = ?''', (arts, chat_id))
+        conn.commit()
+        await bot.send_photo(chat_id, photo, caption)
+    else:
+        await bot.send_message(chat_id, 'Вылазка оказалась безрезультатной, артефактов не найдено')
+    jobs = sheduler.get_jobs()
+    if not jobs:
+        sheduler.pause()
+    sheduler.remove_job(jobs[0].id)
+
+
+@dp.message_handler(commands=['shop'])
+async def shop(message: types.Message):
+    arts = cur2.execute('''SELECT id, name, price FROM artifacts''').fetchall()
+    can_sell = sample(arts, k=3)
+    await message.answer(f'''Торговец: Сидорович
+Покупает:
+    {can_sell[0][1]}. Цена: {can_sell[0][2]} {rub.make_agree_with_number(can_sell[0][2]).word}
+    {can_sell[1][1]}. Цена: {can_sell[1][2]} {rub.make_agree_with_number(can_sell[1][2]).word}
+    {can_sell[2][1]}. Цена: {can_sell[2][2]} {rub.make_agree_with_number(can_sell[2][2]).word}''')
 
 
 if __name__ == '__main__':
