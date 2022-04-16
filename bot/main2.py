@@ -1,11 +1,12 @@
 import logging
 import sqlite3
 from random import random, shuffle, sample
+from collections import Counter
 from requests import get
 
 from config.tg_token import API_TOKEN
 from aiogram import Bot, Dispatcher, executor, types
-from keyboards import chose_faction_kb, remove_keyboard, hire_stalker_kb, menu_kb
+from keyboards import chose_faction_kb, remove_keyboard, hire_stalker_kb, merchants_kb, buy_kb
 from aiogram.dispatcher.filters import Text
 from aiogram.types.input_file import InputFile
 
@@ -32,6 +33,9 @@ sheduler = AsyncIOScheduler()
 
 morph = MorphAnalyzer()
 rub = morph.parse('рубль')[0]
+sht = morph.parse('штука')[0]
+
+can_sell_global = []
 
 
 def user_is_registered(msg):
@@ -47,7 +51,34 @@ def get_info_about_user(user_id):
     power_f = n_stalk * 7
     money = cur.execute('''SELECT money FROM main WHERE user_id = ?''',
                         (user_id,)).fetchone()[0]
-    return n_stalk, power_f, cost, money
+    return {'n_stalk': n_stalk, 'power_f': power_f, 'cost': cost, 'money': money}
+
+
+def get_info_about_arts(user_id):
+    money = get_info_about_user(user_id)['money']
+    arts = cur2.execute('''SELECT id, name, price FROM artifacts''').fetchall()
+    arts_dict = {}
+    for a in arts:
+        arts_dict[str(a[0])] = a[1], a[2]
+    res = cur.execute('''SELECT arts FROM main WHERE user_id = ?''',
+                      (user_id,)).fetchone()[0]
+    if res == '0' or not res:
+        answer_str = 'Тут пусто'
+        arts_on_hand_l = ['0']
+        arts_on_hand_d = Counter(['0'])
+    else:
+        if isinstance(res, int):
+            arts_on_hand_l = [str(res)]
+            arts_on_hand_d = Counter([str(res)])
+        else:
+            arts_on_hand_l = sorted(res.split(';'))
+            arts_on_hand_d = Counter(sorted(res.split(';')))
+        answer_str = '\n'.join(
+            '☢Артефакт: {}. {} {}'.format(arts_dict[str(art_id)][0], num,
+                                          sht.make_agree_with_number(num).word) for
+            art_id, num in arts_on_hand_d.items())
+    return {'arts': arts, 'money': money, 'answer_str': answer_str, 'arts_on_hand_d': arts_on_hand_d,
+            'art_dict': arts_dict, 'arts_on_hand_l': arts_on_hand_l}
 
 
 @dp.message_handler(commands=['start'])
@@ -56,6 +87,12 @@ async def start(message: types.Message):
         cur.execute('''INSERT INTO main(user_id, money, power_of_faction, n_stalk) VALUES (?, 10, 0, 0)''',
                     (message.from_user.id,))
         conn.commit()
+        await dp.bot.set_my_commands([
+            types.BotCommand("help", "Информация о боте"),
+            types.BotCommand("recruitment", "Наем сталкеров"),
+            types.BotCommand("art_raid", "Вылазка за артефактом"),
+            types.BotCommand('shop', 'Покупка товаров, сбыт артефактов')
+        ])
         await message.answer('''[В разработке]
 Ну, здравствуй, сталкер!
 Вижу, ты тут впервые. Выбери, командиром какой из предложенных группировок ты станешь.
@@ -67,16 +104,11 @@ async def start(message: types.Message):
 
 @dp.message_handler(commands=['help'])
 async def help_info(message: types.Message):
-    await dp.bot.set_my_commands([
-        types.BotCommand("help", "Информация о боте"),
-        types.BotCommand("recruitment", "Наем сталкеров"),
-        types.BotCommand("art_raid", "Вылазка за артефактом")
-    ])
     await message.answer('''Telegram бот-игра "S.T.A.L.K.E.R. Война группировок"
-Возглавьте одну из предложенных группировок, 
-устраивайте рейды на мутантов, отправляйте сталкеров из своей группировки на поиски артефактов. 
+Вы возглавляете сталкерскую группировку.
+Отправляйте сталкеров из своей группировки на поиски артефактов. 
 Покупайте и продавайте товары у торговцев. Совершайте атаки на другие группировки.
-Доступно меню команд (кнопка слева от поля ввода сообщения)
+Изучите меню команд (кнопка слева от поля ввода сообщения)
 ''')
 
 
@@ -87,10 +119,10 @@ async def chose_faction(message: types.Message):
         SET faction = (SELECT id FROM factions WHERE name = ?)
         WHERE user_id = ?''', (message.text, message.from_user.id))
         conn.commit()
-        await message.answer("Привествуем тебя в рядах группировки \"{}\"!".format(message.text),
-                             reply_markup=menu_kb)
+        await message.answer("""Привествуем тебя в рядах группировки \"{}\"!
+В целях ознакомление с ботом, введи команду /help""".format(message.text), reply_markup=remove_keyboard)
     else:
-        await message.answer('Я тебя не понимаю. Используй /help для получения информации о боте', reply_markup=menu_kb)
+        await message.answer('Я тебя не понимаю. Используй /help для получения информации о боте')
 
 
 @dp.message_handler(commands=['recruitment'])
@@ -99,8 +131,9 @@ async def recruitment(message: types.Message):
     await message.answer('''☢На данный момент сталкеров в группе: {}
 ☢Мощь группировки: {}
 ☢Стоимость найма: {} {}
-☢Денег: {} {}'''.format(info[0], info[1], info[2], rub.make_agree_with_number(info[2]).word, info[3],
-                        rub.make_agree_with_number(info[3]).word), reply_markup=hire_stalker_kb)
+☢Денег: {} {}'''.format(info['n_stalk'], info['power_f'], info['cost'], rub.make_agree_with_number(info['cost']).word,
+                        info['money'],
+                        rub.make_agree_with_number(info['money']).word), reply_markup=hire_stalker_kb)
 
 
 async def hired_update_text_and_db(message: types.Message, n_stalk, money, cost, power_f, purchase_is_done):
@@ -129,10 +162,10 @@ async def hired_update_text_and_db(message: types.Message, n_stalk, money, cost,
 @dp.callback_query_handler(Text('hire'))
 async def hire_callback(call: types.CallbackQuery):
     info = get_info_about_user(call.from_user.id)
-    money = info[3]
-    cost = info[2]
-    n_stalk = info[0]
-    power_f = info[1]
+    money = info['money']
+    cost = info['cost']
+    n_stalk = info['n_stalk']
+    power_f = info['power_f']
     if money >= cost:
         new_n_stalk = n_stalk + 1
         power_f = new_n_stalk * 7
@@ -169,9 +202,12 @@ async def raid_for_artifact(message: types.Message):
         if art:
             photo = InputFile(art['path'])
             caption = art['description']
+            art_id = str(art['id'])
+        else:
+            art_id = None
 
         trigger = IntervalTrigger(seconds=10)
-        sheduler.add_job(raid, args=[message.chat.id, photo, caption, str(art['id'])], trigger=trigger)
+        sheduler.add_job(raid, args=[message.chat.id, photo, caption, art_id], trigger=trigger)
         try:
             sheduler.start()
         except SchedulerAlreadyRunningError:
@@ -186,9 +222,9 @@ async def raid(chat_id, photo, caption, art_id):
         arts = cur.execute('''SELECT arts FROM main WHERE user_id = ?''',
                            (chat_id,)).fetchone()[0]
         if arts == 0:
-            arts = f'{art_id};'
+            arts = f'{art_id}'
         else:
-            arts = f'{arts}{art_id};'
+            arts = f'{arts};{art_id}'
         cur.execute('''UPDATE main
         SET arts = ?
         WHERE user_id = ?''', (arts, chat_id))
@@ -204,13 +240,61 @@ async def raid(chat_id, photo, caption, art_id):
 
 @dp.message_handler(commands=['shop'])
 async def shop(message: types.Message):
-    arts = cur2.execute('''SELECT id, name, price FROM artifacts''').fetchall()
-    can_sell = sample(arts, k=3)
-    await message.answer(f'''Торговец: Сидорович
+    await message.answer('''Тут распологается наш бессменный торговец - Сидорович''', reply_markup=merchants_kb)
+
+
+async def shop_update_text_and_db(message: types.Message, can_sell, money, answer_str):
+    await message.edit_text(f'''Торговец: Сидорович
+    
 Покупает:
-    {can_sell[0][1]}. Цена: {can_sell[0][2]} {rub.make_agree_with_number(can_sell[0][2]).word}
-    {can_sell[1][1]}. Цена: {can_sell[1][2]} {rub.make_agree_with_number(can_sell[1][2]).word}
-    {can_sell[2][1]}. Цена: {can_sell[2][2]} {rub.make_agree_with_number(can_sell[2][2]).word}''')
+{can_sell[0][1]}. Цена: {can_sell[0][2]} {rub.make_agree_with_number(can_sell[0][2]).word}
+{can_sell[1][1]}. Цена: {can_sell[1][2]} {rub.make_agree_with_number(can_sell[1][2]).word}
+{can_sell[2][1]}. Цена: {can_sell[2][2]} {rub.make_agree_with_number(can_sell[2][2]).word}
+
+Ваш инвентарь: 
+{answer_str}
+
+Денег на счету: {money} {rub.make_agree_with_number(money).word}''', reply_markup=buy_kb)
+
+
+@dp.callback_query_handler(Text('merch'))
+async def shop_callback(call: types.CallbackQuery):
+    global can_sell_global
+    info = get_info_about_arts(call.from_user.id)
+    can_sell_global = sample(info['arts'], k=3)
+    await shop_update_text_and_db(call.message, can_sell_global, info['money'], info['answer_str'])
+    await call.answer()
+
+
+@dp.callback_query_handler(Text(equals=['art1', 'art2', 'art3', 'art4', 'art5']))
+async def art_purchase_callback(call: types.CallbackQuery):
+    info = get_info_about_arts(call.from_user.id)
+    user_info = get_info_about_user(call.from_user.id)
+
+    arts = info['art_dict']
+
+    if call.data[-1] in info['arts_on_hand_l']:
+        if arts[call.data[-1]][0] in [e[1] for e in can_sell_global]:
+            money = user_info['money'] + arts[call.data[-1]][1]
+            info['arts_on_hand_l'].remove(call.data[-1])
+            if info['arts_on_hand_l']:
+                new_art_str = ';'.join(info['arts_on_hand_l'])
+            else:
+                new_art_str = '0'
+
+            cur.execute('''UPDATE main
+            SET money = ?,
+            arts = ?
+            WHERE user_id = ?''', (money, new_art_str, call.from_user.id))
+            conn.commit()
+            info = get_info_about_arts(call.from_user.id)
+
+            await shop_update_text_and_db(call.message, can_sell_global, info['money'],
+                                          info['answer_str'])
+        else:
+            await shop_update_text_and_db(call.message, can_sell_global, info['money'],
+                                          info['answer_str'] + '\n\nСейчас мне это не нужно, зайди попозже')
+    await call.answer()
 
 
 if __name__ == '__main__':
