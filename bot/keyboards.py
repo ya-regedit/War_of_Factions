@@ -2,7 +2,7 @@ from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButt
     InlineKeyboardButton
 
 chose_faction_kb = ReplyKeyboardMarkup([[KeyboardButton('Долг'), KeyboardButton('Свобода'), KeyboardButton('Монолит')],
-                                        [KeyboardButton('Бандиты'), KeyboardButton('Вольные сталкеры')]],
+                                        [KeyboardButton('Бандиты'), KeyboardButton('Чистое небо')]],
                                        resize_keyboard=True,
                                        one_time_keyboard=True)
 remove_keyboard = ReplyKeyboardRemove()

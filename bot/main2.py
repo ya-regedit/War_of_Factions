@@ -1,6 +1,6 @@
 import logging
 import sqlite3
-from random import random, shuffle, sample
+from random import random, shuffle, sample, uniform, randint
 from collections import Counter
 from requests import get
 
@@ -47,11 +47,15 @@ def user_is_registered(msg):
 def get_info_about_user(user_id):
     n_stalk = cur.execute('''SELECT n_stalk FROM main WHERE user_id = ?''',
                           (user_id,)).fetchone()[0]
-    cost = n_stalk * 4 + 5
+    cost = 2 ** n_stalk
     power_f = n_stalk * 7
     money = cur.execute('''SELECT money FROM main WHERE user_id = ?''',
                         (user_id,)).fetchone()[0]
-    return {'n_stalk': n_stalk, 'power_f': power_f, 'cost': cost, 'money': money}
+    faction = cur.execute('''SELECT name FROM factions
+    WHERE id = (SELECT faction FROM main WHERE user_id = ?)''', (user_id,)).fetchone()[0]
+    mutants = cur.execute('''SELECT mutants FROM main WHERE user_id = ?''', (user_id,)).fetchone()[0]
+    return {'n_stalk': n_stalk, 'power_f': power_f, 'cost': cost, 'money': money, 'faction': faction,
+            'mutants': mutants}
 
 
 def get_info_about_arts(user_id):
@@ -91,7 +95,9 @@ async def start(message: types.Message):
             types.BotCommand("help", "Информация о боте"),
             types.BotCommand("recruitment", "Наем сталкеров"),
             types.BotCommand("art_raid", "Вылазка за артефактом"),
-            types.BotCommand('shop', 'Покупка товаров, сбыт артефактов')
+            types.BotCommand('shop', 'Сбыт артефактов'),
+            types.BotCommand('info', 'Информация о группировке'),
+            types.BotCommand('attack', 'Атака на сталкеров другой группировки')
         ])
         await message.answer('''[В разработке]
 Ну, здравствуй, сталкер!
@@ -112,7 +118,7 @@ async def help_info(message: types.Message):
 ''')
 
 
-@dp.message_handler(Text(equals=['Монолит', 'Свобода', 'Долг', 'Вольные сталкеры', 'Бандиты']))
+@dp.message_handler(Text(equals=['Монолит', 'Свобода', 'Долг', 'Чистое небо', 'Бандиты']))
 async def chose_faction(message: types.Message):
     if not cur.execute('''SELECT faction FROM main WHERE user_id = ?''', (message.from_user.id,)).fetchone()[0]:
         cur.execute('''UPDATE main
@@ -120,7 +126,7 @@ async def chose_faction(message: types.Message):
         WHERE user_id = ?''', (message.text, message.from_user.id))
         conn.commit()
         await message.answer("""Привествуем тебя в рядах группировки \"{}\"!
-В целях ознакомление с ботом, введи команду /help""".format(message.text), reply_markup=remove_keyboard)
+В целях ознакомления с ботом, введи команду /help""".format(message.text), reply_markup=remove_keyboard)
     else:
         await message.answer('Я тебя не понимаю. Используй /help для получения информации о боте')
 
@@ -170,7 +176,7 @@ async def hire_callback(call: types.CallbackQuery):
         new_n_stalk = n_stalk + 1
         power_f = new_n_stalk * 7
         money -= cost
-        cost = new_n_stalk * 4 + 5
+        cost = 2 ** new_n_stalk
         await hired_update_text_and_db(call.message, new_n_stalk, money, cost, power_f, True)
     else:
         await hired_update_text_and_db(call.message, n_stalk, money, cost, power_f, False)
@@ -179,45 +185,60 @@ async def hire_callback(call: types.CallbackQuery):
 
 @dp.message_handler(commands='art_raid')
 async def raid_for_artifact(message: types.Message):
-    may_send_stalkers = True
-    jobs = sheduler.get_jobs()
-
-    for j in jobs:
-        if j.name == 'raid':
-            may_send_stalkers = False
-            break
-
-    if may_send_stalkers:
-        arts = get('http://127.0.0.1:5000/arts').json()
-        arts = sorted(arts['arts'], key=lambda x: x['chance'])
-        chance = random()
-        art = None
-        photo, caption = None, None
-        for i in range(len(arts)):
-            if chance <= arts[i]['chance']:
-                art = arts[i]
-                break
-            else:
-                continue
-        if art:
-            photo = InputFile(art['path'])
-            caption = art['description']
-            art_id = str(art['id'])
-        else:
-            art_id = None
-
+    info = get_info_about_user(message.from_user.id)
+    print(info['mutants'])
+    if info['mutants'] > 5:
         trigger = IntervalTrigger(seconds=10)
-        sheduler.add_job(raid, args=[message.chat.id, photo, caption, art_id], trigger=trigger)
+        sheduler.add_job(attack,
+                         args=[message.chat.id, info['n_stalk'], info['money'], info['power_f'], True, info['mutants']],
+                         trigger=trigger)
         try:
             sheduler.start()
         except SchedulerAlreadyRunningError:
             pass
-        await message.answer('Сталкеры отправлены на вылазку. Вернутся через 10 секунд')
+        await message.answer('''Внимание, обнаружено крупное скопление мутантов около нашей базы!!!
+Потребуется какое-то время, чтобы их уничтожить, затем снова отправьте сталкеров на поиск артефактов''')
     else:
-        await message.answer('Сталкеры уже отправлены на вылазку. Дождитесь её окончания')
+        may_send_stalkers = True
+        jobs = sheduler.get_jobs()
+
+        for j in jobs:
+            if j.name in ('raid', 'attack'):
+                may_send_stalkers = False
+                break
+
+        if may_send_stalkers:
+
+            arts = get('http://127.0.0.1:5000/arts').json()
+            arts = sorted(arts['arts'], key=lambda x: x['chance'])
+            chance = random()
+            art = None
+            photo, caption = None, None
+            for i in range(len(arts)):
+                if chance <= arts[i]['chance']:
+                    art = arts[i]
+                    break
+                else:
+                    continue
+            if art:
+                photo = InputFile(art['path'])
+                caption = art['description']
+                art_id = str(art['id'])
+            else:
+                art_id = None
+
+            trigger = IntervalTrigger(seconds=10)
+            sheduler.add_job(raid, args=[message.chat.id, photo, caption, art_id, info['mutants']], trigger=trigger)
+            try:
+                sheduler.start()
+            except SchedulerAlreadyRunningError:
+                pass
+            await message.answer('Сталкеры отправлены на вылазку. Вернутся через 10 секунд')
+        else:
+            await message.answer('Сталкеры уже задействованы. Дождитесь их возвращения на базу')
 
 
-async def raid(chat_id, photo, caption, art_id):
+async def raid(chat_id, photo, caption, art_id, mut):
     if photo:
         arts = cur.execute('''SELECT arts FROM main WHERE user_id = ?''',
                            (chat_id,)).fetchone()[0]
@@ -226,8 +247,9 @@ async def raid(chat_id, photo, caption, art_id):
         else:
             arts = f'{arts};{art_id}'
         cur.execute('''UPDATE main
-        SET arts = ?
-        WHERE user_id = ?''', (arts, chat_id))
+        SET arts = ?,
+        mutants = ?
+        WHERE user_id = ?''', (arts, mut + 1, chat_id))
         conn.commit()
         await bot.send_photo(chat_id, photo, caption)
     else:
@@ -295,6 +317,93 @@ async def art_purchase_callback(call: types.CallbackQuery):
             await shop_update_text_and_db(call.message, can_sell_global, info['money'],
                                           info['answer_str'] + '\n\nСейчас мне это не нужно, зайди попозже')
     await call.answer()
+
+
+@dp.message_handler(commands=['info'])
+async def progress_info(message: types.Message):
+    info = get_info_about_user(message.from_user.id)
+    info2 = get_info_about_arts(message.from_user.id)
+    faction = info['faction']
+
+    photo = InputFile(f'C:/Users/Invertor/PycharmProjects/pythonProject/War_of_Factions/api/data/img/{faction}.png')
+    caption = f"""Группировка: {faction}
+Мощь группировки: {info['power_f']}
+Средств на счету: {info['money']} {rub.make_agree_with_number(info['money']).word}
+
+Инвентарь:
+{info2['answer_str']}"""
+    await bot.send_photo(message.from_user.id, photo, caption)
+
+
+@dp.message_handler(commands=['attack'])
+async def attack_other_faction(message: types.Message):
+    may_send_stalkers = True
+    jobs = sheduler.get_jobs()
+    info = get_info_about_user(message.from_user.id)
+    if info['n_stalk'] >= 5:
+        for j in jobs:
+            if j.name in ('attack', 'raid'):
+                may_send_stalkers = False
+                break
+
+        if may_send_stalkers:
+            trigger = IntervalTrigger(seconds=10)
+            sheduler.add_job(attack, args=[message.chat.id, info['n_stalk'], info['money'], info['power_f'], False,
+                                           info['mutants']],
+                             trigger=trigger)
+            try:
+                sheduler.start()
+            except SchedulerAlreadyRunningError:
+                pass
+            await message.answer('Атака началась! Сталкеры вернутся через 10 секунд')
+        else:
+            await message.answer('Сталкеры уже задействованы. Дождитесь их возвращения на базу')
+    else:
+        await message.answer('Твой отряд еще недостаточно силен для совершения нападений')
+
+
+async def attack(chat_id, n_stalk, money, power_f, mutant_attack, mut):
+    if not mutant_attack:
+        if power_f < 100:
+            percent = uniform(0.0, 0.7)
+        elif 100 < power_f < 300:
+            percent = uniform(0.0, 0.5)
+        elif 300 < power_f < 500:
+            percent = uniform(0.0, 0.3)
+        else:
+            percent = uniform(0.0, 0.2)
+        new_n_stalk = round(n_stalk * (1 - percent))
+        stalk_lost = n_stalk - new_n_stalk
+        profit = randint(1, n_stalk) * 14
+        cur.execute('''UPDATE main
+        SET n_stalk = ?,
+        money = ?,
+        mutants = ?
+        WHERE user_id = ?''', (new_n_stalk, money + profit, mut + 1, chat_id))
+        conn.commit()
+        await bot.send_message(chat_id, f'''Атака завершена
+Потеряно сталкеров: {stalk_lost}
+Захвачено средств: {profit} {rub.make_agree_with_number(profit).word}''')
+    else:
+        cur.execute('''UPDATE main
+        SET mutants = ?
+        WHERE user_id = ?''', (0, chat_id))
+        conn.commit()
+        await bot.send_message(chat_id, 'Атака мутантов отбита')
+    jobs = sheduler.get_jobs()
+    if not jobs:
+        sheduler.pause()
+    sheduler.remove_job(jobs[0].id)
+
+
+@dp.message_handler()
+async def sink_msg(message: types.Message):
+    if user_is_registered(message):
+        await message.answer('Команда не распознана')
+    else:
+        await message.answer('''Приветствую, телеграмм пользователь! 
+Ты попал в чат небольшим ботом-игрой про отряд сталкеров
+Напиши /start чтобы начать''')
 
 
 if __name__ == '__main__':
