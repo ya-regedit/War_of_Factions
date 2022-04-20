@@ -1,6 +1,6 @@
 import logging
 import sqlite3
-from random import random, shuffle, sample, uniform, randint
+from random import random, sample, uniform, randint
 from collections import Counter
 from requests import get
 
@@ -88,9 +88,6 @@ def get_info_about_arts(user_id):
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     if not user_is_registered(message):
-        cur.execute('''INSERT INTO main(user_id, money, power_of_faction, n_stalk) VALUES (?, 10, 0, 0)''',
-                    (message.from_user.id,))
-        conn.commit()
         await dp.bot.set_my_commands([
             types.BotCommand("help", "Информация о боте"),
             types.BotCommand("recruitment", "Наем сталкеров"),
@@ -99,11 +96,9 @@ async def start(message: types.Message):
             types.BotCommand('info', 'Информация о группировке'),
             types.BotCommand('attack', 'Атака на сталкеров другой группировки')
         ])
-        await message.answer('''[В разработке]
-Ну, здравствуй, сталкер!
+        await message.answer('''Ну, здравствуй, сталкер!
 Вижу, ты тут впервые. Выбери, командиром какой из предложенных группировок ты станешь.
-Подробнее о боте можешь узнать, отправив команду /help
-[В разработке]''', reply_markup=chose_faction_kb)
+Подробнее о боте можешь узнать, отправив команду /help''', reply_markup=chose_faction_kb)
     else:
         await message.answer('''Удачной дороги, сталкер!''')
 
@@ -120,7 +115,9 @@ async def help_info(message: types.Message):
 
 @dp.message_handler(Text(equals=['Монолит', 'Свобода', 'Долг', 'Чистое небо', 'Бандиты']))
 async def chose_faction(message: types.Message):
-    if not cur.execute('''SELECT faction FROM main WHERE user_id = ?''', (message.from_user.id,)).fetchone()[0]:
+    if not user_is_registered(message):
+        cur.execute('''INSERT INTO main(user_id, money, power_of_faction, n_stalk) VALUES (?, 10, 0, 0)''',
+                    (message.from_user.id,))
         cur.execute('''UPDATE main
         SET faction = (SELECT id FROM factions WHERE name = ?)
         WHERE user_id = ?''', (message.text, message.from_user.id))
