@@ -10,7 +10,7 @@ api = Api(app)
 
 
 def main():
-    db_session.global_init('db/artifacts.db')
+    db_session.global_init('api/db/artifacts.db')
     app.register_blueprint(arts_api.blueprint)
 
 
