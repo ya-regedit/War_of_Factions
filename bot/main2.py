@@ -130,13 +130,16 @@ async def chose_faction(message: types.Message):
 
 @dp.message_handler(commands=['recruitment'])
 async def recruitment(message: types.Message):
-    info = get_info_about_user(message.from_user.id)
-    await message.answer('''☢На данный момент сталкеров в группе: {}
+    if user_is_registered(message):
+        info = get_info_about_user(message.from_user.id)
+        await message.answer('''☢На данный момент сталкеров в группе: {}
 ☢Мощь группировки: {}
 ☢Стоимость найма: {} {}
 ☢Денег: {} {}'''.format(info['n_stalk'], info['power_f'], info['cost'], rub.make_agree_with_number(info['cost']).word,
                         info['money'],
                         rub.make_agree_with_number(info['money']).word), reply_markup=hire_stalker_kb)
+    else:
+        await message.answer('Для начала игры введи /start')
 
 
 async def hired_update_text_and_db(message: types.Message, n_stalk, money, cost, power_f, purchase_is_done):
@@ -182,59 +185,63 @@ async def hire_callback(call: types.CallbackQuery):
 
 @dp.message_handler(commands='art_raid')
 async def raid_for_artifact(message: types.Message):
-    info = get_info_about_user(message.from_user.id)
-    print('mutants', info['mutants'])
-    if info['mutants'] >= 5:
-        trigger = IntervalTrigger(seconds=5)
-        sheduler.add_job(attack,
-                         args=[message.chat.id, info['n_stalk'], info['money'], info['power_f'], True, info['mutants']],
-                         trigger=trigger)
-        try:
-            sheduler.start()
-        except SchedulerAlreadyRunningError:
-            pass
-        await message.answer('''Внимание, обнаружено крупное скопление мутантов около нашей базы!!!
-Потребуется какое-то время, чтобы их уничтожить, после этого снова отправьте сталкеров на поиск артефактов''')
-    else:
-        may_send_stalkers = True
-        jobs = sheduler.get_jobs()
-
-        for j in jobs:
-            if j.name in ('raid', 'attack'):
-                may_send_stalkers = False
-                break
-
-        if may_send_stalkers:
-
-            arts = get('http://127.0.0.1:5000/arts').json()
-            arts = sorted(arts['arts'], key=lambda x: x['chance'])
-            chance = random()
-            print(arts)
-            print(chance)
-            art = None
-            photo, caption = None, None
-            for i in range(len(arts)):
-                if chance <= arts[i]['chance']:
-                    art = arts[i]
-                    break
-                else:
-                    continue
-            if art:
-                photo = InputFile(art['path'])
-                caption = art['description']
-                art_id = str(art['id'])
-            else:
-                art_id = None
-
+    if user_is_registered(message):
+        info = get_info_about_user(message.from_user.id)
+        print('mutants', info['mutants'])
+        if info['mutants'] >= 5:
             trigger = IntervalTrigger(seconds=5)
-            sheduler.add_job(raid, args=[message.chat.id, photo, caption, art_id, info['mutants']], trigger=trigger)
+            sheduler.add_job(attack,
+                             args=[message.chat.id, info['n_stalk'], info['money'], info['power_f'], True,
+                                   info['mutants']],
+                             trigger=trigger)
             try:
                 sheduler.start()
             except SchedulerAlreadyRunningError:
                 pass
-            await message.answer('Сталкеры отправлены на вылазку. Вернутся через 5 секунд')
+            await message.answer('''Внимание, обнаружено крупное скопление мутантов около нашей базы!!!
+Потребуется какое-то время, чтобы их уничтожить, после этого снова отправьте сталкеров на поиск артефактов''')
         else:
-            await message.answer('Сталкеры уже задействованы. Дождитесь их возвращения на базу')
+            may_send_stalkers = True
+            jobs = sheduler.get_jobs()
+
+            for j in jobs:
+                if j.name in ('raid', 'attack'):
+                    may_send_stalkers = False
+                    break
+
+            if may_send_stalkers:
+
+                arts = get('http://127.0.0.1:5000/arts').json()
+                arts = sorted(arts['arts'], key=lambda x: x['chance'])
+                chance = random()
+                print(arts)
+                print(chance)
+                art = None
+                photo, caption = None, None
+                for i in range(len(arts)):
+                    if chance <= arts[i]['chance']:
+                        art = arts[i]
+                        break
+                    else:
+                        continue
+                if art:
+                    photo = InputFile(art['path'])
+                    caption = art['description']
+                    art_id = str(art['id'])
+                else:
+                    art_id = None
+
+                trigger = IntervalTrigger(seconds=5)
+                sheduler.add_job(raid, args=[message.chat.id, photo, caption, art_id, info['mutants']], trigger=trigger)
+                try:
+                    sheduler.start()
+                except SchedulerAlreadyRunningError:
+                    pass
+                await message.answer('Сталкеры отправлены на вылазку. Вернутся через 5 секунд')
+            else:
+                await message.answer('Сталкеры уже задействованы. Дождитесь их возвращения на базу')
+    else:
+        await message.answer('Для начала игры введи /start')
 
 
 async def raid(chat_id, photo, caption, art_id, mut):
@@ -265,7 +272,10 @@ async def raid(chat_id, photo, caption, art_id, mut):
 
 @dp.message_handler(commands=['shop'])
 async def shop(message: types.Message):
-    await message.answer('''Тут распологается наш бессменный торговец - Сидорович''', reply_markup=merchants_kb)
+    if user_is_registered(message):
+        await message.answer('''Тут распологается наш бессменный торговец - Сидорович''', reply_markup=merchants_kb)
+    else:
+        await message.answer('Для начала игры введи /start')
 
 
 async def shop_update_text_and_db(message: types.Message, can_sell, money, answer_str):
@@ -324,45 +334,51 @@ async def art_purchase_callback(call: types.CallbackQuery):
 
 @dp.message_handler(commands=['info'])
 async def progress_info(message: types.Message):
-    info = get_info_about_user(message.from_user.id)
-    info2 = get_info_about_arts(message.from_user.id)
-    faction = info['faction']
+    if user_is_registered(message):
+        info = get_info_about_user(message.from_user.id)
+        info2 = get_info_about_arts(message.from_user.id)
+        faction = info['faction']
 
-    photo = InputFile(f'data/img/{faction}.png')
-    caption = f"""Группировка: {faction}
+        photo = InputFile(f'data/img/{faction}.png')
+        caption = f"""Группировка: {faction}
 Мощь группировки: {info['power_f']}
 Средств на счету: {info['money']} {rub.make_agree_with_number(info['money']).word}
 
 Инвентарь:
 {info2['answer_str']}"""
-    await bot.send_photo(message.from_user.id, photo, caption)
+        await bot.send_photo(message.from_user.id, photo, caption)
+    else:
+        await message.answer('Для начала игры введи /start')
 
 
 @dp.message_handler(commands=['attack'])
 async def attack_other_faction(message: types.Message):
-    may_send_stalkers = True
-    jobs = sheduler.get_jobs()
-    info = get_info_about_user(message.from_user.id)
-    if info['n_stalk'] >= 5:
-        for j in jobs:
-            if j.name in ('attack', 'raid'):
-                may_send_stalkers = False
-                break
+    if user_is_registered(message):
+        may_send_stalkers = True
+        jobs = sheduler.get_jobs()
+        info = get_info_about_user(message.from_user.id)
+        if info['n_stalk'] >= 5:
+            for j in jobs:
+                if j.name in ('attack', 'raid'):
+                    may_send_stalkers = False
+                    break
 
-        if may_send_stalkers:
-            trigger = IntervalTrigger(seconds=5)
-            sheduler.add_job(attack, args=[message.chat.id, info['n_stalk'], info['money'], info['power_f'], False,
-                                           info['mutants']],
-                             trigger=trigger)
-            try:
-                sheduler.start()
-            except SchedulerAlreadyRunningError:
-                pass
-            await message.answer('Атака началась! Сталкеры вернутся через 5 секунд')
+            if may_send_stalkers:
+                trigger = IntervalTrigger(seconds=5)
+                sheduler.add_job(attack, args=[message.chat.id, info['n_stalk'], info['money'], info['power_f'], False,
+                                               info['mutants']],
+                                 trigger=trigger)
+                try:
+                    sheduler.start()
+                except SchedulerAlreadyRunningError:
+                    pass
+                await message.answer('Атака началась! Сталкеры вернутся через 5 секунд')
+            else:
+                await message.answer('Сталкеры уже задействованы. Дождитесь их возвращения на базу')
         else:
-            await message.answer('Сталкеры уже задействованы. Дождитесь их возвращения на базу')
+            await message.answer('Твой отряд еще недостаточно силен для совершения налетов')
     else:
-        await message.answer('Твой отряд еще недостаточно силен для совершения налетов')
+        await message.answer('Для начала игры введи /start')
 
 
 async def attack(chat_id, n_stalk, money, power_f, mutant_attack, mut):
