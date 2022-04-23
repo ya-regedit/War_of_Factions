@@ -209,6 +209,8 @@ async def raid_for_artifact(message: types.Message):
             arts = get('http://127.0.0.1:5000/arts').json()
             arts = sorted(arts['arts'], key=lambda x: x['chance'])
             chance = random()
+            print(arts)
+            print(chance)
             art = None
             photo, caption = None, None
             for i in range(len(arts)):
@@ -326,7 +328,7 @@ async def progress_info(message: types.Message):
     info2 = get_info_about_arts(message.from_user.id)
     faction = info['faction']
 
-    photo = InputFile(f'C:/Users/Invertor/PycharmProjects/pythonProject/War_of_Factions/api/data/img/{faction}.png')
+    photo = InputFile(f'data/img/{faction}.png')
     caption = f"""Группировка: {faction}
 Мощь группировки: {info['power_f']}
 Средств на счету: {info['money']} {rub.make_agree_with_number(info['money']).word}

@@ -15,11 +15,9 @@ merchants_kb.add(InlineKeyboardButton(text='Зайти', callback_data='merch'))
 
 buy_kb = InlineKeyboardMarkup(5)
 buy_kb.add(InlineKeyboardButton(text='Продать артефакт "Батарейка"', callback_data='art1'))
-buy_kb.add(InlineKeyboardButton(text='Продать артефакт "anomal"', callback_data='art2'))
-buy_kb.add(InlineKeyboardButton(text='Продать артефакт "name3"', callback_data='art3'))
-buy_kb.add(InlineKeyboardButton(text='Продать артефакт "name4"', callback_data='art4'))
-buy_kb.add(InlineKeyboardButton(text='Продать артефакт "name5"', callback_data='art5'))
-
-
+buy_kb.add(InlineKeyboardButton(text='Продать артефакт "Грави"', callback_data='art2'))
+buy_kb.add(InlineKeyboardButton(text='Продать артефакт "Ночная звезда"', callback_data='art3'))
+buy_kb.add(InlineKeyboardButton(text='Продать артефакт "Каменный цветок"', callback_data='art4'))
+buy_kb.add(InlineKeyboardButton(text='Продать артефакт "Лунный свет"', callback_data='art5'))
 
 sell_arts_kb = None
